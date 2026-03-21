@@ -54,6 +54,16 @@ typedef enum
 #define LED_LOG_OK_PERIOD   75u
 #define LED_LOG_NOK_PERIOD  25u
 
+/* Buzzer LEWY — PA6 (CN10 pin 13) */
+#define BUZZER_GPIO_PORT    GPIOA
+#define BUZZER_PIN          GPIO_PIN_6
+
+/* Buzzer PRAWY — PB0 (CN10 pin 31) */
+#define BUZZER_R_PORT       GPIOC
+#define BUZZER_R_PIN        GPIO_PIN_3
+
+#define BUZZER_FREQ_HZ      2000u
+
 /* USER CODE END PD */
 
 /* Private variables ---------------------------------------------------------*/
@@ -87,6 +97,12 @@ void ToF_Start(void);
 int32_t FillBuffer(float *buffer);
 void PrintBuffer(float *buffer);
 void Log(void);
+
+void Buzzer_Init(void);
+void Buzzer_Tone(uint32_t freq_hz, uint32_t duration_ms);
+void Buzzer_Beep(uint32_t freq_hz, uint32_t on_ms, uint32_t off_ms, uint8_t times);
+void Buzzer_R_Tone(uint32_t freq_hz, uint32_t duration_ms);
+void Buzzer_R_Beep(uint32_t freq_hz, uint32_t on_ms, uint32_t off_ms, uint8_t times);
 
 /* USER CODE END PFP */
 
@@ -123,12 +139,18 @@ int main(void)
 
   printf("\r\nVer: %u.%u.%u\r\n", VERSION, SIGNAL_SIZE, TOF_SENSOR_ODR);
 
+  Buzzer_Init();
+
   ToF_Init();
   ToF_ProfileConfig(SIGNAL_SIZE);
   ToF_Start();
 
   neai_state_var = neai_classification_init();
   printf("NEAI init: %d\r\n", neai_state_var);
+
+  /* Krótki sygnał startowy */
+  Buzzer_Beep(2000, 80, 60, 2);
+  Buzzer_R_Beep(2000, 80, 60, 2);
 
   /* USER CODE END 2 */
 
@@ -181,6 +203,83 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void Buzzer_Init(void)
+{
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull  = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+
+  /* Lewy — PA6 */
+  GPIO_InitStruct.Pin = BUZZER_PIN;
+  HAL_GPIO_Init(BUZZER_GPIO_PORT, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
+
+  /* Prawy — PB0 */
+  GPIO_InitStruct.Pin = BUZZER_R_PIN;
+  HAL_GPIO_Init(BUZZER_R_PORT, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(BUZZER_R_PORT, BUZZER_R_PIN, GPIO_PIN_RESET);
+}
+
+/* ── Buzzer LEWY (PA6) ────────────────────────────────────────────────── */
+
+void Buzzer_Tone(uint32_t freq_hz, uint32_t duration_ms)
+{
+  if (freq_hz == 0) { HAL_Delay(duration_ms); return; }
+  uint32_t half_period_us = 500000u / freq_hz;
+  uint32_t cycles = (freq_hz * duration_ms) / 1000u;
+  for (uint32_t i = 0; i < cycles; i++)
+  {
+    HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
+    volatile uint32_t d = half_period_us * 10u;
+    while (d--) { __NOP(); }
+    HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
+    d = half_period_us * 10u;
+    while (d--) { __NOP(); }
+  }
+}
+
+void Buzzer_Beep(uint32_t freq_hz, uint32_t on_ms, uint32_t off_ms, uint8_t times)
+{
+  for (uint8_t i = 0; i < times; i++)
+  {
+    Buzzer_Tone(freq_hz, on_ms);
+    if (i < times - 1) HAL_Delay(off_ms);
+  }
+}
+
+/* ── Buzzer PRAWY (PB0) ───────────────────────────────────────────────── */
+
+void Buzzer_R_Tone(uint32_t freq_hz, uint32_t duration_ms)
+{
+  if (freq_hz == 0) { HAL_Delay(duration_ms); return; }
+  uint32_t half_period_us = 500000u / freq_hz;
+  uint32_t cycles = (freq_hz * duration_ms) / 1000u;
+  for (uint32_t i = 0; i < cycles; i++)
+  {
+    HAL_GPIO_WritePin(BUZZER_R_PORT, BUZZER_R_PIN, GPIO_PIN_SET);
+    volatile uint32_t d = half_period_us * 10u;
+    while (d--) { __NOP(); }
+    HAL_GPIO_WritePin(BUZZER_R_PORT, BUZZER_R_PIN, GPIO_PIN_RESET);
+    d = half_period_us * 10u;
+    while (d--) { __NOP(); }
+  }
+}
+
+void Buzzer_R_Beep(uint32_t freq_hz, uint32_t on_ms, uint32_t off_ms, uint8_t times)
+{
+  for (uint8_t i = 0; i < times; i++)
+  {
+    Buzzer_R_Tone(freq_hz, on_ms);
+    if (i < times - 1) HAL_Delay(off_ms);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
 
 void ToF_Init(void)
 {
@@ -296,6 +395,25 @@ void Log(void)
              probabilities[id_class] * 100.0f);
 
       printf("# -> %s\r\n", neai_get_class_name(id_class));
+
+      switch (id_class)
+      {
+        case 0:  /* class_free — 1 krótki pisk */
+            Buzzer_Tone(2500, 150);
+            Buzzer_R_Tone(2500, 150);
+          break;
+        case 1:  /* class_left — lewy buzzer */
+          Buzzer_R_Beep(200, 60, 40, 3);
+          break;
+        case 2:  /* class_right — prawy buzzer */
+          Buzzer_Beep(3000, 60, 40, 3);
+          break;
+        case 3:  /* class_wall / przed nami — oba */
+
+          break;
+        default:
+          break;
+      }
     }
     else
     {
