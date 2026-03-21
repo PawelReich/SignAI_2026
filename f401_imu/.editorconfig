@@ -1,0 +1,16 @@
+# Stop looking for other .editorconfig files above this directory
+root = true
+
+# Apply to C and C++ source and header files
+[*.{c,h,cpp,hpp}]
+
+# Whitespaces
+trim_trailing_whitespace = true
+
+# Indentation options
+indent_size = 4
+indent_style = space
+
+# New line preferences
+end_of_line = lf
+insert_final_newline = true
