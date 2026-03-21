@@ -26,6 +26,7 @@
 
 #include "53l8a1_ranging_sensor.h"
 #include "stdio.h"
+#include "NanoEdgeAI.h"
 
 /* USER CODE END Includes */
 
@@ -42,23 +43,18 @@ typedef enum
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define VERSION        150126u
+#define VERSION             150126u
 
-#define TOF_SENSOR_ODR      3u /* Output Data Rate [Hz] */
-#define RESULT_VALUES_NB    1u /* Logged result values: DISTANCE, SIGNAL */
+#define TOF_SENSOR_ODR      15u
+#define RESULT_VALUES_NB    1u
 #define TOF_RESOLUTION      VL53L8CX_RESOLUTION_8X8
 #define SIGNAL_SIZE         (TOF_RESOLUTION * RESULT_VALUES_NB)
-#define DISTANCE_MAX        4000u  /* [mm */
-#define SKIPPED_RESULTS_NB  2u  /* First ToF sensor results to be skipped: transition stage */
-#define LED_LOG_OK_PERIOD   75u  /* [ms] */
+#define DISTANCE_MAX        2000u
+#define SKIPPED_RESULTS_NB  2u
+#define LED_LOG_OK_PERIOD   75u
 #define LED_LOG_NOK_PERIOD  25u
 
 /* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 
@@ -69,10 +65,15 @@ RANGING_SENSOR_ProfileConfig_t Profile;
 
 __IO uint32_t ToF_EventFlag = SET;
 __IO States_t appState = LOG;
-__IO uint32_t ld2PeriodCnt = 0;  /* LD2 toggling counter incremented by SysTick */
-__IO uint32_t ld2Period = 0;  /* LD2 toggle timing to be set by user */
+__IO uint32_t ld2PeriodCnt = 0;
+__IO uint32_t ld2Period = 0;
 uint32_t resultCnt = 0;
+
 float input_user_buffer[SIGNAL_SIZE] = {0};
+
+float probabilities[NEAI_NUMBER_OF_CLASSES] = {0};
+int   id_class = 0;
+enum neai_state neai_state_var;
 
 /* USER CODE END PV */
 
@@ -94,121 +95,89 @@ void Log(void);
 
 int _write(int file, char *ptr, int len)
 {
- HAL_UART_Transmit(&huart2,(uint8_t*)ptr,len,100);
+  HAL_UART_Transmit(&huart2, (uint8_t*)ptr, len, 100);
   return len;
 }
 
 /* USER CODE END 0 */
 
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
-  /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
   /* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+
   /* USER CODE BEGIN 2 */
 
-  printf("\r\nVer: %u.%u.%u\r\n",VERSION,SIGNAL_SIZE,TOF_SENSOR_ODR);
+  printf("\r\nVer: %u.%u.%u\r\n", VERSION, SIGNAL_SIZE, TOF_SENSOR_ODR);
 
   ToF_Init();
   ToF_ProfileConfig(SIGNAL_SIZE);
   ToF_Start();
 
+  neai_state_var = neai_classification_init();
+  printf("NEAI init: %d\r\n", neai_state_var);
+
   /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
-
-	switch (appState)
-	{
-	  case LOG:
-	    Log();
-	  	break;
-	  default:
-	    appState = LOG;
-	    break;
-	}
-
+    switch (appState)
+    {
+      case LOG:
+        Log();
+        break;
+      default:
+        appState = LOG;
+        break;
+    }
+    /* USER CODE END 3 */
   }
-  /* USER CODE END 3 */
 }
 
-/**
-  * @brief System Clock Configuration
-  * @retval None
-  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure the main internal regulator output voltage
-  */
   if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
-  {
     Error_Handler();
-  }
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.OscillatorType      = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState            = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 10;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+  RCC_OscInitStruct.PLL.PLLState        = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource       = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM            = 1;
+  RCC_OscInitStruct.PLL.PLLN            = 10;
+  RCC_OscInitStruct.PLL.PLLP            = RCC_PLLP_DIV7;
+  RCC_OscInitStruct.PLL.PLLQ            = RCC_PLLQ_DIV2;
+  RCC_OscInitStruct.PLL.PLLR            = RCC_PLLR_DIV2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
     Error_Handler();
-  }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+                                   | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
-  {
     Error_Handler();
-  }
 }
 
 /* USER CODE BEGIN 4 */
@@ -219,25 +188,20 @@ void ToF_Init(void)
 
   printf("ToF sensor init...\r\n");
 
-  /* Sensor reset */
-   HAL_GPIO_WritePin(GPIOA,GPIO_PIN_7,GPIO_PIN_RESET);
-   HAL_Delay(2);
-   HAL_GPIO_WritePin(GPIOA,GPIO_PIN_7,GPIO_PIN_SET);
-   HAL_Delay(2);
-   HAL_GPIO_WritePin(GPIOA,GPIO_PIN_7,GPIO_PIN_RESET);
-   HAL_Delay(2);
-   HAL_GPIO_WritePin(GPIOA,GPIO_PIN_7,GPIO_PIN_SET);
-   HAL_Delay(2);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET); HAL_Delay(2);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);   HAL_Delay(2);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET); HAL_Delay(2);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);   HAL_Delay(2);
 
   status = VL53L8A1_RANGING_SENSOR_Init(VL53L8A1_DEV_CENTER);
   if (status != BSP_ERROR_NONE)
   {
-	printf("ERROR\r\n");
-	Error_Handler();
+    printf("ERROR\r\n");
+    Error_Handler();
   }
   else
   {
-	printf("OK\r\n");
+    printf("OK\r\n");
   }
 }
 
@@ -260,20 +224,19 @@ void ToF_ProfileConfig(uint8_t resolution)
       Profile.RangingProfile = RS_PROFILE_8x8_CONTINUOUS;
       break;
   }
-  Profile.TimingBudget = 30; /* 5 ms < TimingBudget < 100 ms */
-  Profile.Frequency = TOF_SENSOR_ODR; /* Hz */
-  Profile.EnableSignal = 1; /* Enable: 1, Disable: 0 */
-  Profile.EnableAmbient = 0; /* Enable: 1, Disable: 0 */
+
+  Profile.TimingBudget  = 30;
+  Profile.Frequency     = TOF_SENSOR_ODR;
+  Profile.EnableSignal  = 1;
+  Profile.EnableAmbient = 0;
 
   VL53L8A1_RANGING_SENSOR_ConfigProfile(VL53L8A1_DEV_CENTER, &Profile);
-  printf("ToF sensor ID: 0x%X\r\n",(int)Id);
+  printf("ToF sensor ID: 0x%X\r\n", (int)Id);
 }
 
 void ToF_Start(void)
 {
-  int32_t status = 0;
-
-  status = VL53L8A1_RANGING_SENSOR_Start(VL53L8A1_DEV_CENTER, RS_MODE_BLOCKING_CONTINUOUS);
+  int32_t status = VL53L8A1_RANGING_SENSOR_Start(VL53L8A1_DEV_CENTER, RS_MODE_BLOCKING_CONTINUOUS);
   if (status != BSP_ERROR_NONE)
   {
     printf("ERROR: TOF sensor start failed\r\n");
@@ -283,7 +246,6 @@ void ToF_Start(void)
 
 int32_t FillBuffer(float *buffer)
 {
-  uint16_t i, j;
   RANGING_SENSOR_Result_t Result;
   int32_t status = 0;
 
@@ -294,20 +256,10 @@ int32_t FillBuffer(float *buffer)
     if (status == BSP_ERROR_NONE)
     {
       resultCnt++;
-      j = 0;
-      for (i = 0; i < TOF_RESOLUTION; i++)
+      for (uint16_t i = 0; i < TOF_RESOLUTION; i++)
       {
-          uint32_t dist = Result.ZoneResult[i].Distance[0];
-          uint8_t  st   = Result.ZoneResult[i].Status[0];
-
-          /* tymczasowo — drukuj status żeby zobaczyć co przychodzi */
-          if (i == 0)
-              printf("# zone0: dist=%lu status=%u\r\n", dist, st);
-
-          if (dist > 0 && dist <= DISTANCE_MAX)
-              buffer[j++] = (float)dist;
-          else
-              buffer[j++] = (float)DISTANCE_MAX;
+        uint32_t dist = Result.ZoneResult[i].Distance[0];
+        buffer[i] = (dist > 0 && dist <= DISTANCE_MAX) ? (float)dist : (float)DISTANCE_MAX;
       }
     }
   }
@@ -316,92 +268,80 @@ int32_t FillBuffer(float *buffer)
 
 void PrintBuffer(float *buffer)
 {
-  uint16_t i = 0;
-  while (i < SIGNAL_SIZE)
+  for (uint16_t i = 0; i < SIGNAL_SIZE; i++)
   {
     if (i < SIGNAL_SIZE - 1)
-      printf("%d,", (int)buffer[i]);   /* przecinek */
+      printf("%d,", (int)buffer[i]);
     else
-      printf("%d\n", (int)buffer[i]);  /* \n na końcu */
-    i++;
+      printf("%d\n", (int)buffer[i]);
   }
 }
 
 void Log(void)
 {
-  int32_t status = 0;
+  int32_t status = FillBuffer(input_user_buffer);
 
-  status = FillBuffer(input_user_buffer);
-  if (resultCnt>SKIPPED_RESULTS_NB)
+  if (resultCnt > SKIPPED_RESULTS_NB)
   {
     if (status == 0)
     {
-	  ld2Period = LED_LOG_OK_PERIOD;
+      ld2Period = LED_LOG_OK_PERIOD;
+
       PrintBuffer(input_user_buffer);
+
+      neai_classification(input_user_buffer, probabilities, &id_class);
+
+      printf("# CLASS:%d CONF:%.0f%%\r\n",
+             id_class,
+             probabilities[id_class] * 100.0f);
+
+      printf("# -> %s\r\n", neai_get_class_name(id_class));
     }
     else
     {
-	  ld2Period = LED_LOG_NOK_PERIOD;
+      ld2Period = LED_LOG_NOK_PERIOD;
     }
   }
   else
   {
-	printf("Waiting for valid data...\r\n");
+    printf("Waiting for valid data...\r\n");
   }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  if (GPIO_Pin==GPIO_PIN_4)
-  {
-	ToF_EventFlag = SET;
-  }
+  if (GPIO_Pin == GPIO_PIN_4)
+    ToF_EventFlag = SET;
 }
 
 void HAL_IncTick(void)
 {
   uwTick += (uint32_t)uwTickFreq;
-  if(ld2PeriodCnt>0)
+  if (ld2PeriodCnt > 0)
   {
     ld2PeriodCnt--;
   }
   else
   {
     ld2PeriodCnt = ld2Period;
-    HAL_GPIO_TogglePin(GPIOA,GPIO_PIN_5);
+    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
   }
 }
 
 /* USER CODE END 4 */
 
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
-  }
+  while (1) {}
   /* USER CODE END Error_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

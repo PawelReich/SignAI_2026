@@ -39,7 +39,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/BSP/Components/vl53l8cx/porting/platform.h \
  ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_plugin_xtalk.h \
  ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_api.h \
- ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_plugin_detection_thresholds.h
+ ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_plugin_detection_thresholds.h \
+ ../NEAI_Lib/Inc/NanoEdgeAI.h
 ../Core/Inc/main.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h:
 ../Core/Inc/stm32l4xx_hal_conf.h:
@@ -86,3 +87,4 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_plugin_xtalk.h:
 ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_api.h:
 ../Drivers/BSP/Components/vl53l8cx/modules/vl53l8cx_plugin_detection_thresholds.h:
+../NEAI_Lib/Inc/NanoEdgeAI.h:
