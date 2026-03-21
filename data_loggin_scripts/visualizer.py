@@ -21,7 +21,7 @@ from collections import deque
 
 # ── Konfiguracja ─────────────────────────────────────────────
 DEFAULT_BAUD    = 2000000
-DIST_MAX        = 4000
+DIST_MAX        = 1500
 MIN_VALID_DIST  = 30
 NOISE_THRESHOLD = 15
 SERIAL_QUEUE    = deque(maxlen=10)   # bufor klatek z wątku UART
