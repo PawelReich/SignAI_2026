@@ -21,7 +21,7 @@ from collections import deque
 
 # ── Konfiguracja ─────────────────────────────────────────────
 DEFAULT_BAUD    = 2000000
-DIST_MAX        = 1500
+DIST_MAX        = 4000
 MIN_VALID_DIST  = 30
 NOISE_THRESHOLD = 15
 SERIAL_QUEUE    = deque(maxlen=10)   # bufor klatek z wątku UART
@@ -155,7 +155,7 @@ def run(port, baud, save_file, max_rows, use_smooth):
         im.set_data(grid)
 
         flat = grid.flatten()
-        for r in range(8):
+        for r in range(8):  
             for c in range(8):
                 v = int(grid[r, c])
                 cell_texts[r][c].set_text('' if v >= DIST_MAX else str(v))
@@ -177,8 +177,8 @@ def run(port, baud, save_file, max_rows, use_smooth):
 
     ani = animation.FuncAnimation(
         fig, update_frame,
-        interval=33,          # ~30 fps max
-        blit=False,            # blitting — rysuj tylko zmienione elementy
+        interval=33,          
+        blit=False,
         cache_frame_data=False
     )
 
