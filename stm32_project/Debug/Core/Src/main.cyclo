@@ -11,7 +11,9 @@
 ../Core/Src/main.c:336:6:ToF_Start	2
 ../Core/Src/main.c:346:9:FillBuffer	6
 ../Core/Src/main.c:368:6:PrintBuffer	3
-../Core/Src/main.c:379:6:Log	6
-../Core/Src/main.c:429:6:HAL_GPIO_EXTI_Callback	2
-../Core/Src/main.c:435:6:HAL_IncTick	2
-../Core/Src/main.c:451:6:Error_Handler	1
+../Core/Src/main.c:381:10:GetMinDistance	4
+../Core/Src/main.c:395:6:Buzzer_Proximity	12
+../Core/Src/main.c:422:6:Log	6
+../Core/Src/main.c:483:6:HAL_GPIO_EXTI_Callback	2
+../Core/Src/main.c:489:6:HAL_IncTick	2
+../Core/Src/main.c:505:6:Error_Handler	1

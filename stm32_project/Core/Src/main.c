@@ -376,6 +376,49 @@ void PrintBuffer(float *buffer)
   }
 }
 
+/* Zwraca minimalną odległość z wybranej strefy siatki 8x8.
+   col_start, col_end — zakres kolumn (0-7 włącznie) */
+uint32_t GetMinDistance(float *buffer, uint8_t col_start, uint8_t col_end)
+{
+  uint32_t min_dist = DISTANCE_MAX;
+  for (uint8_t row = 0; row < 8; row++)
+  {
+    for (uint8_t col = col_start; col <= col_end; col++)
+    {
+      uint32_t v = (uint32_t)buffer[row * 8 + col];
+      if (v < min_dist) min_dist = v;
+    }
+  }
+  return min_dist;
+}
+
+void Buzzer_Proximity(uint32_t dist_mm, uint32_t dist_max_mm, uint8_t buzzer)
+{
+  if (dist_mm >= dist_max_mm) return;  /* za daleko — cisza */
+
+  uint32_t pause_ms;
+  if (dist_mm < 100)
+    pause_ms = 0;   /* ciągły ton — bardzo blisko */
+  else
+    pause_ms = (dist_mm * 500) / dist_max_mm;
+
+  uint32_t beep_ms = 40;  /* długość pojedynczego piknięcia */
+
+  if (pause_ms == 0)
+  {
+    /* Ciągły ton — przeszkoda krytycznie blisko */
+    if (buzzer == 0 || buzzer == 2) Buzzer_Tone(250, 150);
+    if (buzzer == 1 || buzzer == 2) Buzzer_R_Tone(2500, 150);
+  }
+  else
+  {
+    /* Jedno piknięcie — kolejne wywołanie przyjdzie z następną klatką */
+    if (buzzer == 0 || buzzer == 2) Buzzer_Tone(250, beep_ms);
+    if (buzzer == 1 || buzzer == 2) Buzzer_R_Tone(2500, beep_ms);
+    HAL_Delay(pause_ms);
+  }
+}
+
 void Log(void)
 {
   int32_t status = FillBuffer(input_user_buffer);
@@ -398,19 +441,30 @@ void Log(void)
 
       switch (id_class)
       {
-        case 0:  /* class_free — 1 krótki pisk */
-            Buzzer_Tone(2500, 150);
-            Buzzer_R_Tone(2500, 150);
+        case 0:  /* class_wall — cała siatka, oba buzzery */
+        {
+          uint32_t d = GetMinDistance(input_user_buffer, 0, 7);
+          Buzzer_Proximity(d, 1000, 2);
           break;
-        case 1:  /* class_left — lewy buzzer */
-          Buzzer_R_Beep(200, 60, 40, 3);
-          break;
-        case 2:  /* class_right — prawy buzzer */
-          Buzzer_Beep(3000, 60, 40, 3);
-          break;
-        case 3:  /* class_wall / przed nami — oba */
+        }
 
+        case 1:  /* class_right — prawa połowa siatki, prawy buzzer */
+        {
+          uint32_t d = GetMinDistance(input_user_buffer, 4, 7);
+          Buzzer_Proximity(d, 1000, 1);
           break;
+        }
+
+        case 2:  /* class_left — lewa połowa siatki, lewy buzzer */
+        {
+          uint32_t d = GetMinDistance(input_user_buffer, 0, 3);
+          Buzzer_Proximity(d, 1000, 0);
+          break;
+        }
+
+        case 3:  /* class_free — cisza */
+          break;
+
         default:
           break;
       }
