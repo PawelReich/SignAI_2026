@@ -49,6 +49,7 @@ Buzzer_Proximity(dist_mm, dist_max_mm, buzzer) scales beep frequency with distan
 IMU data arrives over UART from the sensor board. The MotionController provides sit/stand detection.
 
 ## Project Structure
+```
 ├── Core/
 │   └── Src/
 │       └── main.c          # Main board firmware
@@ -78,7 +79,7 @@ IMU data arrives over UART from the sensor board. The MotionController provides 
 │   │   └── Tof.c
 │   │   └── Top.c
 └── X-CUBE-TOF1
-
+```
 ## Build & Flash
 
 Requires max *STM32CubeIDE 1.18.2*.
