@@ -5,16 +5,13 @@ static uint32_t lastTick = 0;
 STHS34PF80_Object_t sths_obj;
 LSM6DSV16X_Object_t lsm_obj;
 
-LSM6DSV16X_Axes_t acc_axes;
-LSM6DSV16X_Axes_t gyro_axes;
 uint8_t lsm_acc_ready = 0;
 uint8_t lsm_gyro_ready = 0;
-int16_t presence_data = 0;
-uint8_t presence_flag = 0;
-
-float ambient_temp = 0.0f;
-float object_temp = 0.0f;
 uint8_t sths_ready = 0;
+
+int16_t presence_data = 0;
+LSM6DSV16X_Axes_t acc_axes;
+LSM6DSV16X_Axes_t gyro_axes;
 
 I2C_HandleTypeDef *IMU_I2C;
 UART_HandleTypeDef *MASTER_UART;
@@ -48,11 +45,7 @@ void Imu_Loop()
     STHS34PF80_TEMP_Get_DRDY_Status(&sths_obj, &sths_ready);
     if (sths_ready == 1)
     {
-        STHS34PF80_TEMP_GetTemperature(&sths_obj, &ambient_temp);
-        STHS34PF80_GetObjectTemperature(&sths_obj, &object_temp);
-
         STHS34PF80_GetPresenceData(&sths_obj, &presence_data);
-        STHS34PF80_GetPresenceFlag(&sths_obj, &presence_flag);
     }
 
     uint32_t newTick = HAL_GetTick();
@@ -68,8 +61,7 @@ void Imu_Loop()
         payload.gyroX = gyro_axes.x;
         payload.gyroY = gyro_axes.y;
         payload.gyroZ = gyro_axes.z;
-        payload.presenceAmbient = ambient_temp;
-        payload.presenceDiff =  object_temp;
+        payload.presenceValue = presence_data;
 
         HAL_UART_Transmit(MASTER_UART, (uint8_t*)& payload, sizeof(payload), 100);
     }

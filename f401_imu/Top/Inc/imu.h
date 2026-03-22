@@ -21,6 +21,5 @@ struct SensorData
     int32_t accelX;
     int32_t accelY;
     int32_t accelZ;
-    int32_t presenceAmbient;
-    int32_t presenceDiff;
+    int16_t presenceValue;
 };
