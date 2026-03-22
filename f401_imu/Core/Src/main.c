@@ -22,11 +22,26 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h> // Needed for printf
+
+#include <stdint.h>
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef struct {
+    float pitch_angle;     // Ostateczny, odfiltrowany kąt pochylenia
+    float acc_mag_ema;
+    uint32_t freeze_timer; // Licznik "zamrożenia" urządzenia
+    bool is_frozen;        // Flaga statusu (dla reszty programu)
+} MotionController;
 
+typedef struct {
+    bool left_top;
+    bool right_top;
+    bool left_bot;
+    bool right_bot;
+} AI_Zones;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -36,13 +51,27 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+// --- KONFIGURACJA ---
+#define DT 0.050f                  // Czas pętli w sekundach
+#define ALPHA 0.1f               // Współczynnik filtru komplementarnego
+#define EMA_BETA 0.5f             // Współczynnik filtru EMA dla drgań (0.1 - mocny, 0.9 - słaby)
+#define VIB_THRESHOLD 100.0f        // Próg odchyłki wektora grawitacji m mg
+#define FREEZE_TIME_MS 500        // Czas zamrożenia po wstrząsie (w milisekundach)
+#define FREEZE_CYCLES (uint32_t)(FREEZE_TIME_MS / (DT * 1000.0f))
 
+// Progi pochylenia
+#define PITCH_MUTE_BOTTOM 15.0f // Przy 15° ToF zaczyna widzieć podłogę dolnym rzędem
+#define PITCH_MUTE_ALL 35.0f // Przy 35° mute na wszystko
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef huart2;
+
+AI_Zones detections;
+MotionController mc;
+float acc_x, acc_y, acc_z, gyro_x;
 
 /* USER CODE BEGIN PV */
 
@@ -180,6 +209,75 @@ void Scan_I2C_Bus(void)
     printf("----------------------------------\r\n");
 }
 
+// Inicjalizacja struktury
+void MotionController_Init(MotionController* mc) {
+    mc->pitch_angle = 0.0f;
+    mc->acc_mag_ema = 1000.0f;
+    mc->freeze_timer = 0;
+    mc->is_frozen = false;
+}
+
+void AI_Zones_Init(AI_Zones* detections) {
+    detections->left_top = false;
+    detections->right_top = false;
+    detections->left_bot = false;
+    detections->right_bot = false;
+}
+
+// funkcja wykonywana co DT w main
+void MotionController_Update(AI_Zones* detections, MotionController* mc, float acc_x, float acc_y, float acc_z, float gyro_y) {
+
+    // WYKRYWANIE DRGAŃ
+    float acc_magnitude = sqrtf(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z);
+
+    // użycie filtracji wykładniczej średniej kroczącej na akcelerometr
+    mc->acc_mag_ema = (EMA_BETA * acc_magnitude) + ((1.0f - EMA_BETA) * mc->acc_mag_ema);
+
+    float acc_diff = fabsf(mc->acc_mag_ema - 1000.0f); // Odchyłka od idealnej grawitacji (1g)
+
+    // Jeśli odchyłka jest większa niż próg, odnawiamy licznik zamrożenia
+    if (acc_diff > VIB_THRESHOLD) {
+        mc->freeze_timer = FREEZE_CYCLES;
+    }
+
+    // Dekrementacja licznika i aktualizacja flagi
+    if (mc->freeze_timer > 0) {
+        mc->freeze_timer--;
+        mc->is_frozen = true;
+    } else {
+        mc->is_frozen = false;
+    }
+
+    // OBLICZENIE KĄTA Z AKCELEROMETRU (w stopniach)
+    float acc_pitch = atan2f(acc_x, acc_z) * (180.0f / 3.14159265f); // upewnić się że osie y i z się zgadzają
+    printf("Acc_pitch=%.2f\r\n", acc_pitch);
+
+    // Zamiana na stopnie w czasie dt
+    float gyro_delta_deg = (gyro_y / 1000.0f) * DT;
+
+    // APLIKACJA FILTRU KOMPLEMENTARNEGO
+    mc->pitch_angle = ALPHA * (mc->pitch_angle + gyro_delta_deg) + (1.0f - ALPHA) * acc_pitch;
+
+    if (mc->is_frozen) {
+        // URZĄDZENIE TRZĘSIE SIĘ:
+    	// mc->pitch_angle = mc->pitch_angle + gyro_delta_deg;
+
+        detections->left_top = false; detections->right_top = false;
+        detections->left_bot = false; detections->right_bot = false;
+    } else {
+        // NORMALNA PRACA:
+    	// mc->pitch_angle = ALPHA * (mc->pitch_angle + gyro_delta_deg) + (1.0f - ALPHA) * acc_pitch;
+
+        if (fabsf(mc->pitch_angle-90.0f) >= PITCH_MUTE_ALL) {
+            detections->left_top = false; detections->right_top = false;
+            detections->left_bot = false; detections->right_bot = false;
+        }
+        else if (fabsf(mc->pitch_angle-90.0f) >= PITCH_MUTE_BOTTOM) {
+            detections->left_bot = false; detections->right_bot = false;
+        }
+    }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -217,6 +315,9 @@ int main(void)
     MX_I2C1_Init();
     /* USER CODE BEGIN 2 */
 
+    MotionController_Init(&mc);
+    AI_Zones_Init(&detections);
+
     //  Scan_I2C_Bus();
 
     BSP_Sensors_Init();
@@ -250,7 +351,10 @@ int main(void)
         {
             LSM6DSV16X_ACC_GetAxes(&lsm_obj, &acc_axes);
 
-            printf("ACC (g): X=%.2ld, Y=%.2ld, Z=%.2ld\r\n", acc_axes.x, acc_axes.y, acc_axes.z);
+//            acc_axes.x = acc_axes.x/1000.0f;
+//            acc_axes.y = acc_axes.y/1000.0f;
+//            acc_axes.z = acc_axes.z/1000.0f;
+            printf("ACC (g): X=%.2f, Y=%.2f, Z=%.2f\r\n", acc_axes.x/1000.0f, acc_axes.y/1000.0f, acc_axes.z/1000.0f);
         }
 
         LSM6DSV16X_GYRO_Get_DRDY_Status(&lsm_obj, &lsm_gyro_ready);
@@ -258,7 +362,10 @@ int main(void)
         {
             LSM6DSV16X_GYRO_GetAxes(&lsm_obj, &gyro_axes);
 
-            printf("GYRO (deg/s): X=%.1ld, Y=%.1ld, Z=%.1ld\r\n", gyro_axes.x, gyro_axes.y, gyro_axes.z);
+//            gyro_axes.x = gyro_axes.x/1000.0f;
+//			gyro_axes.y = gyro_axes.y/1000.0f;
+//			gyro_axes.z = gyro_axes.z/1000.0f;
+            printf("GYRO (deg/s): X=%.2f, Y=%.2f, Z=%.2f\r\n", gyro_axes.x/1000.0f, gyro_axes.y/1000.0f, gyro_axes.z/1000.0f);
         }
 
         STHS34PF80_TEMP_Get_DRDY_Status(&sths_obj, &sths_ready);
@@ -276,7 +383,17 @@ int main(void)
             printf("STHS: Room=%.1f C | Heat Delta=%.2f C | Flag=%d\r\n", ambient_temp, diff_temp, presence_flag);
         }
 
-        HAL_Delay(500);
+        // Ustawianie na true dla testów, żeby zoabczyć co mationcontroller ustawia na true
+        detections->left_top = false; detections->right_top = false;
+        detections->left_bot = false; detections->right_bot = false;
+
+        MotionController_Update(&detections, &mc, acc_axes.x, acc_axes.y, acc_axes.z, gyro_axes.y);
+
+        printf("Values pitch_angle=%.2f, acc_mag_ema=%.2f, is_frozen=%d\r\n", mc.pitch_angle, mc.acc_mag_ema/1000.0f, mc.is_frozen);
+        printf("Left top=%d     Right top=%d\r\n", detections.left_top, detections.right_top);
+        printf("Left bot=%d     Right bot=%d\r\n", detections.left_bot, detections.right_bot);
+
+        HAL_Delay(50);
     }
     /* USER CODE END 3 */
 }

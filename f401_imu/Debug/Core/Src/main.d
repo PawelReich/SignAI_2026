@@ -27,10 +27,10 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h \
- ../Drivers/BSP/Components/sths34pf80/sths34pf80.h \
- ../Drivers/BSP/Components/sths34pf80/sths34pf80_reg.h \
  ../Drivers/BSP/Components/lsm6dsv16x/lsm6dsv16x.h \
- ../Drivers/BSP/Components/lsm6dsv16x/lsm6dsv16x_reg.h
+ ../Drivers/BSP/Components/lsm6dsv16x/lsm6dsv16x_reg.h \
+ ../Drivers/BSP/Components/sths34pf80/sths34pf80.h \
+ ../Drivers/BSP/Components/sths34pf80/sths34pf80_reg.h
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
@@ -60,7 +60,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h:
-../Drivers/BSP/Components/sths34pf80/sths34pf80.h:
-../Drivers/BSP/Components/sths34pf80/sths34pf80_reg.h:
 ../Drivers/BSP/Components/lsm6dsv16x/lsm6dsv16x.h:
 ../Drivers/BSP/Components/lsm6dsv16x/lsm6dsv16x_reg.h:
+../Drivers/BSP/Components/sths34pf80/sths34pf80.h:
+../Drivers/BSP/Components/sths34pf80/sths34pf80_reg.h:
