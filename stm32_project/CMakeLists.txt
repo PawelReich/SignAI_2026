@@ -72,11 +72,17 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    ./Top/Src/Top.c
+    ./Top/Src/Tof.c
+    ./Top/Src/Buzzer.c
+    ./Top/Src/Imu_Reader.c
+    ./Top/Src/MotionController.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ./NEAI_Lib/Inc
+    ./Top/Inc/
     # Add user defined include paths
 )
 
