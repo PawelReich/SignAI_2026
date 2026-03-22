@@ -152,12 +152,11 @@ struct SensorData
     int32_t accelY;
     int32_t accelZ;
 
-    float presenceAmbient;
-    float presenceDiff;
+    int16_t presenceValue;
 };
 uint8_t rx_byte;            // Holds the single byte we just received
 uint8_t sync_state = 0;     // Tracks our progress finding the header
-uint8_t payload_buffer[32]; // Holds the 32 bytes of actual data
+uint8_t payload_buffer[26]; // Holds the 32 bytes of actual data
 uint8_t payload_index = 0;  // Tracks how many payload bytes we have collected
 
 volatile struct SensorData receivedData;
@@ -199,12 +198,12 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             payload_index++;
 
             // Did we get all 32 bytes of the payload?
-            if (payload_index >= 32)
+            if (payload_index >= 26)
             {
                 // We got a complete, perfectly synced packet!
                 // Copy the 32 bytes directly into our struct, starting at gyroX
                 // (We skip over the 'header' variable in the struct using &myReceivedData.gyroX)
-            	memcpy((void*)&receivedData.gyroX, payload_buffer, 32);
+            	memcpy((void*)&receivedData.gyroX, payload_buffer, 26);
 
                 // You can now use your data! e.g., myReceivedData.accelZ
 
@@ -681,8 +680,8 @@ void PrintBuffer(float *buffer)
 //        }
 //    }
 
-    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\nGyro X:%ld Y:%ld Z:%ld\nAccl X:%ld Y:%ld Z:%ld\n", receivedData.gyroX, receivedData.gyroY, receivedData.gyroZ, receivedData.accelX,
-                    receivedData.accelY, receivedData.accelZ);
+    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\nGyro X:%ld Y:%ld Z:%ld\nAccl X:%ld Y:%ld Z:%ld\nprox: %h\n", receivedData.gyroX, receivedData.gyroY, receivedData.gyroZ, receivedData.accelX,
+                    receivedData.accelY, receivedData.accelZ, receivedData.presenceValue);
 
     /* Blast the entire buffered frame out over UART in one single shot */
     printf("%s", out_buf);
@@ -716,7 +715,7 @@ void Log(void)
             bool mute_all = mc.is_sitting ||  mc.is_frozen;
             bool mute_bot = (fabsf(pitch - 90.0f) >= PITCH_MUTE_BOTTOM);
 
-            mute_all = false;
+//            mute_all = false;
             if (mute_all)
             {
                 // nic nie rób
@@ -727,7 +726,7 @@ void Log(void)
                 switch (id_class)
                 {
                     case 0: /* class_wall — przeszkoda wszędzie, oba buzzery */
-                    	if(receivedData.presenceDiff > 1.2){
+                    	if(receivedData.presenceValue > 5000){
                     		Buzzer_Tone(523, 150);  // C5
 							Buzzer_Tone(659, 150);  // E5
 							Buzzer_Tone(784, 150);  // G5
