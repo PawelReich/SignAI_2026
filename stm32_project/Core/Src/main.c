@@ -27,8 +27,8 @@
 #include "53l8a1_ranging_sensor.h"
 #include "NanoEdgeAI.h"
 #include "stdio.h"
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /* USER CODE END Includes */
 
@@ -40,13 +40,14 @@ typedef enum
     LOG,
 } States_t;
 
-typedef struct {
+typedef struct
+{
     float pitch_angle;
     float acc_mag_ema;
     uint32_t freeze_timer;
     bool is_frozen;
-    bool is_sitting;        // ← NOWE
-    float acc_z_ema;        // ← NOWE - wygładzona oś Z do wykrywania trendu
+    bool is_sitting; // ← NOWE
+    float acc_z_ema; // ← NOWE - wygładzona oś Z do wykrywania trendu
 } MotionController;
 
 /* USER CODE END PTD */
@@ -77,16 +78,16 @@ typedef struct {
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define DT 0.050f                  // Czas pętli w sekundach
-#define ALPHA 0.1f               // Współczynnik filtru komplementarnego
-#define EMA_BETA 0.5f             // Współczynnik filtru EMA dla drgań (0.1 - mocny, 0.9 - słaby)
-#define VIB_THRESHOLD 100.0f        // Próg odchyłki wektora grawitacji m mg
-#define FREEZE_TIME_MS 500        // Czas zamrożenia po wstrząsie (w milisekundach)
+#define DT 0.050f            // Czas pętli w sekundach
+#define ALPHA 0.1f           // Współczynnik filtru komplementarnego
+#define EMA_BETA 0.5f        // Współczynnik filtru EMA dla drgań (0.1 - mocny, 0.9 - słaby)
+#define VIB_THRESHOLD 100.0f // Próg odchyłki wektora grawitacji m mg
+#define FREEZE_TIME_MS 500   // Czas zamrożenia po wstrząsie (w milisekundach)
 #define FREEZE_CYCLES (uint32_t)(FREEZE_TIME_MS / (DT * 1000.0f))
 
 // Progi pochylenia
 #define PITCH_MUTE_BOTTOM 15.0f // Przy 15° ToF zaczyna widzieć podłogę dolnym rzędem
-#define PITCH_MUTE_ALL 35.0f // Przy 35° mute na wszystko
+#define PITCH_MUTE_ALL 35.0f    // Przy 35° mute na wszystko
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -203,7 +204,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
                 // We got a complete, perfectly synced packet!
                 // Copy the 32 bytes directly into our struct, starting at gyroX
                 // (We skip over the 'header' variable in the struct using &myReceivedData.gyroX)
-            	memcpy((void*)&receivedData.gyroX, payload_buffer, 26);
+                memcpy((void *)&receivedData.gyroX, payload_buffer, 26);
 
                 // You can now use your data! e.g., myReceivedData.accelZ
 
@@ -224,17 +225,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 }
 
 // Inicjalizacja struktury
-void MotionController_Init(MotionController* mc) {
+void MotionController_Init(MotionController *mc)
+{
     mc->pitch_angle = 0.0f;
     mc->acc_mag_ema = 1000.0f;
     mc->freeze_timer = 0;
     mc->is_frozen = false;
     mc->is_sitting = false;
-    mc->acc_z_ema = 1000.0f;  // 1g w spoczynku
+    mc->acc_z_ema = 1000.0f; // 1g w spoczynku
 }
 
 // funkcja wykonywana co DT w main
-void MotionController_Update(MotionController* mc, float acc_x, float acc_y, float acc_z, float gyro_y) {
+void MotionController_Update(MotionController *mc, float acc_x, float acc_y, float acc_z, float gyro_y)
+{
 
     // WYKRYWANIE DRGAŃ
     float acc_magnitude = sqrtf(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z);
@@ -243,14 +246,18 @@ void MotionController_Update(MotionController* mc, float acc_x, float acc_y, flo
 
     float acc_diff = fabsf(mc->acc_mag_ema - 1000.0f);
 
-    if (acc_diff > VIB_THRESHOLD) {
+    if (acc_diff > VIB_THRESHOLD)
+    {
         mc->freeze_timer = FREEZE_CYCLES;
     }
 
-    if (mc->freeze_timer > 0) {
+    if (mc->freeze_timer > 0)
+    {
         mc->freeze_timer--;
         mc->is_frozen = true;
-    } else {
+    }
+    else
+    {
         mc->is_frozen = false;
     }
 
@@ -263,25 +270,28 @@ void MotionController_Update(MotionController* mc, float acc_x, float acc_y, flo
     // FILTR KOMPLEMENTARNY
     mc->pitch_angle = ALPHA * (mc->pitch_angle + gyro_delta_deg) + (1.0f - ALPHA) * acc_pitch;
 
-    // WYKRYWANIE SIADANIA/WSTAWANIA
-	#define SIT_DOWN_THRESHOLD   200.0f
-	#define STAND_UP_THRESHOLD  -200.0f
-	#define ACC_Z_EMA_BETA       0.3f
+// WYKRYWANIE SIADANIA/WSTAWANIA
+#define SIT_DOWN_THRESHOLD 200.0f
+#define STAND_UP_THRESHOLD -200.0f
+#define ACC_Z_EMA_BETA 0.3f
 
     mc->acc_z_ema = (ACC_Z_EMA_BETA * acc_z) + ((1.0f - ACC_Z_EMA_BETA) * mc->acc_z_ema);
 
     float acc_z_delta_raw = acc_z - 1000.0f;
 
-    if (!mc->is_sitting && acc_z_delta_raw > SIT_DOWN_THRESHOLD) {
+    if (!mc->is_sitting && acc_z_delta_raw > SIT_DOWN_THRESHOLD)
+    {
         mc->is_sitting = true;
         printf(">> SITTING\r\n");
-    } else if (mc->is_sitting && acc_z_delta_raw < STAND_UP_THRESHOLD) {
+    }
+    else if (mc->is_sitting && acc_z_delta_raw < STAND_UP_THRESHOLD)
+    {
         mc->is_sitting = false;
         printf(">> STANDING\r\n");
     }
 
-//    printf("pitch=%.1f sitting=%d acc_z_delta=%.1f frozen=%d\r\n",
-//           mc->pitch_angle, mc->is_sitting, acc_z_delta_raw, mc->is_frozen);
+    //    printf("pitch=%.1f sitting=%d acc_z_delta=%.1f frozen=%d\r\n",
+    //           mc->pitch_angle, mc->is_sitting, acc_z_delta_raw, mc->is_frozen);
 }
 /* USER CODE END 0 */
 
@@ -661,27 +671,27 @@ void PrintBuffer(float *buffer)
     int pos = 0;
 
     /* Reset cursor to top-left smoothly */
-//    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[1;1H\n");
+    //    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[1;1H\n");
 
     uint16_t row_width = 8;
 
-//    for (uint16_t i = 0; i < SIGNAL_SIZE; i++)
-//    {
-//        uint8_t color_code = get_fast_color(buffer[i]);
-//
-//        /* Add the background color and two spaces to the buffer.
-//           Notice we DO NOT reset the color here to save UART bandwidth! */
-//        pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[48;5;%dm  ", color_code);
-//
-//        /* At the end of a row, reset formatting and drop to a new line */
-//        if ((i + 1) % row_width == 0)
-//        {
-//            pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[0m\n");
-//        }
-//    }
+    //    for (uint16_t i = 0; i < SIGNAL_SIZE; i++)
+    //    {
+    //        uint8_t color_code = get_fast_color(buffer[i]);
+    //
+    //        /* Add the background color and two spaces to the buffer.
+    //           Notice we DO NOT reset the color here to save UART bandwidth! */
+    //        pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[48;5;%dm  ", color_code);
+    //
+    //        /* At the end of a row, reset formatting and drop to a new line */
+    //        if ((i + 1) % row_width == 0)
+    //        {
+    //            pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[0m\n");
+    //        }
+    //    }
 
-    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\nGyro X:%ld Y:%ld Z:%ld\nAccl X:%ld Y:%ld Z:%ld\nprox: %h\n", receivedData.gyroX, receivedData.gyroY, receivedData.gyroZ, receivedData.accelX,
-                    receivedData.accelY, receivedData.accelZ, receivedData.presenceValue);
+    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\nGyro X:%ld Y:%ld Z:%ld\nAccl X:%ld Y:%ld Z:%ld\nprox: %h\n", receivedData.gyroX, receivedData.gyroY, receivedData.gyroZ,
+                    receivedData.accelX, receivedData.accelY, receivedData.accelZ, receivedData.presenceValue);
 
     /* Blast the entire buffered frame out over UART in one single shot */
     printf("%s", out_buf);
@@ -702,20 +712,14 @@ void Log(void)
             printf("# CLASS:%d CONF:%.0f%%\r\n", id_class, probabilities[id_class] * 100.0f);
             printf("# -> %s\r\n", neai_get_class_name(id_class));
 
-            MotionController_Update(
-                &mc,
-                (float)receivedData.accelX,
-                (float)receivedData.accelY,
-                (float)receivedData.accelZ,
-                (float)receivedData.gyroY
-            );
+            MotionController_Update(&mc, (float)receivedData.accelX, (float)receivedData.accelY, (float)receivedData.accelZ, (float)receivedData.gyroY);
 
             // Wyznacz co wolno buzzeć na podstawie kąta
             float pitch = mc.pitch_angle;
-            bool mute_all = mc.is_sitting ||  mc.is_frozen;
+            bool mute_all = mc.is_sitting || mc.is_frozen;
             bool mute_bot = (fabsf(pitch - 90.0f) >= PITCH_MUTE_BOTTOM);
 
-//            mute_all = false;
+            //            mute_all = false;
             if (mute_all)
             {
                 // nic nie rób
@@ -726,29 +730,31 @@ void Log(void)
                 switch (id_class)
                 {
                     case 0: /* class_wall — przeszkoda wszędzie, oba buzzery */
-                    	if(receivedData.presenceValue > 5000){
-                    		Buzzer_Tone(523, 150);  // C5
-							Buzzer_Tone(659, 150);  // E5
-							Buzzer_Tone(784, 150);  // G5
-							Buzzer_Tone(1047, 300); // C6 - długa nuta
+                        if (receivedData.presenceValue > 5000)
+                        {
+                            Buzzer_Tone(523, 150);  // C5
+                            Buzzer_Tone(659, 150);  // E5
+                            Buzzer_Tone(784, 150);  // G5
+                            Buzzer_Tone(1047, 300); // C6 - długa nuta
 
-							HAL_Delay(50);
+                            HAL_Delay(50);
 
-							// Prawy buzzer - echo
-							Buzzer_R_Tone(523, 150);
-							Buzzer_R_Tone(659, 150);
-							Buzzer_R_Tone(784, 150);
-							Buzzer_R_Tone(1047, 300);
-                    	}
-                    	else{
-							d = GetMinDistance(input_user_buffer, 0, 7);
-							Buzzer_Proximity(d, 1000, 2);
-                    	}
+                            // Prawy buzzer - echo
+                            Buzzer_R_Tone(523, 150);
+                            Buzzer_R_Tone(659, 150);
+                            Buzzer_R_Tone(784, 150);
+                            Buzzer_R_Tone(1047, 300);
+                        }
+                        else
+                        {
+                            d = GetMinDistance(input_user_buffer, 0, 7);
+                            Buzzer_Proximity(d, 1000, 2);
+                        }
                         break;
 
-                    case 1: /* class_left — przeszkoda po lewej */
+                    case 1:                                          /* class_left — przeszkoda po lewej */
                         d = GetMinDistance(input_user_buffer, 0, 7); // cała lewa strona
-                        Buzzer_Proximity(d, 1000, 1); // lewy buzzer
+                        Buzzer_Proximity(d, 1000, 1);                // lewy buzzer
                         break;
 
                     case 2: /* class_right — przeszkoda po prawej */
@@ -757,8 +763,8 @@ void Log(void)
                         break;
 
                     case 3: /* class_free — ściana przed nami, oba */
-//                        d = GetMinDistance(input_user_buffer, 0, 7);
-//                        Buzzer_Proximity(d, 1000, 2);
+                            //                        d = GetMinDistance(input_user_buffer, 0, 7);
+                            //                        Buzzer_Proximity(d, 1000, 2);
                         break;
 
                     default:
