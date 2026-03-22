@@ -27,6 +27,8 @@
 #include "53l8a1_ranging_sensor.h"
 #include "NanoEdgeAI.h"
 #include "stdio.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 /* USER CODE END Includes */
 
@@ -37,6 +39,15 @@ typedef enum
 {
     LOG,
 } States_t;
+
+typedef struct {
+    float pitch_angle;
+    float acc_mag_ema;
+    uint32_t freeze_timer;
+    bool is_frozen;
+    bool is_sitting;        // ← NOWE
+    float acc_z_ema;        // ← NOWE - wygładzona oś Z do wykrywania trendu
+} MotionController;
 
 /* USER CODE END PTD */
 
@@ -66,11 +77,22 @@ typedef enum
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define DT 0.050f                  // Czas pętli w sekundach
+#define ALPHA 0.1f               // Współczynnik filtru komplementarnego
+#define EMA_BETA 0.5f             // Współczynnik filtru EMA dla drgań (0.1 - mocny, 0.9 - słaby)
+#define VIB_THRESHOLD 100.0f        // Próg odchyłki wektora grawitacji m mg
+#define FREEZE_TIME_MS 500        // Czas zamrożenia po wstrząsie (w milisekundach)
+#define FREEZE_CYCLES (uint32_t)(FREEZE_TIME_MS / (DT * 1000.0f))
 
+// Progi pochylenia
+#define PITCH_MUTE_BOTTOM 15.0f // Przy 15° ToF zaczyna widzieć podłogę dolnym rzędem
+#define PITCH_MUTE_ALL 35.0f // Przy 35° mute na wszystko
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 
+MotionController mc;
+float acc_x, acc_y, acc_z, gyro_x;
 /* USER CODE BEGIN PV */
 
 RANGING_SENSOR_Capabilities_t Cap;
@@ -87,11 +109,19 @@ float input_user_buffer[SIGNAL_SIZE] = {0};
 float probabilities[NEAI_NUMBER_OF_CLASSES] = {0};
 int id_class = 0;
 enum neai_state neai_state_var;
+enum neai_state neai_2_state_var;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+
+/* USER CODE BEGIN PFP */
+int _write(int file, char *ptr, int len)
+{
+    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
 /* USER CODE BEGIN PFP */
 
 void ToF_Init(void);
@@ -131,12 +161,6 @@ uint8_t payload_buffer[32]; // Holds the 32 bytes of actual data
 uint8_t payload_index = 0;  // Tracks how many payload bytes we have collected
 
 volatile struct SensorData receivedData;
-
-int _write(int file, char *ptr, int len)
-{
-    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, 100);
-    return len;
-}
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
@@ -180,7 +204,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
                 // We got a complete, perfectly synced packet!
                 // Copy the 32 bytes directly into our struct, starting at gyroX
                 // (We skip over the 'header' variable in the struct using &myReceivedData.gyroX)
-                memcpy(&receivedData.gyroX, payload_buffer, 32);
+            	memcpy((void*)&receivedData.gyroX, payload_buffer, 32);
 
                 // You can now use your data! e.g., myReceivedData.accelZ
 
@@ -198,6 +222,67 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         // CRITICAL: Always ask the hardware to listen for the NEXT single byte
         HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
     }
+}
+
+// Inicjalizacja struktury
+void MotionController_Init(MotionController* mc) {
+    mc->pitch_angle = 0.0f;
+    mc->acc_mag_ema = 1000.0f;
+    mc->freeze_timer = 0;
+    mc->is_frozen = false;
+    mc->is_sitting = false;
+    mc->acc_z_ema = 1000.0f;  // 1g w spoczynku
+}
+
+// funkcja wykonywana co DT w main
+void MotionController_Update(MotionController* mc, float acc_x, float acc_y, float acc_z, float gyro_y) {
+
+    // WYKRYWANIE DRGAŃ
+    float acc_magnitude = sqrtf(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z);
+
+    mc->acc_mag_ema = (EMA_BETA * acc_magnitude) + ((1.0f - EMA_BETA) * mc->acc_mag_ema);
+
+    float acc_diff = fabsf(mc->acc_mag_ema - 1000.0f);
+
+    if (acc_diff > VIB_THRESHOLD) {
+        mc->freeze_timer = FREEZE_CYCLES;
+    }
+
+    if (mc->freeze_timer > 0) {
+        mc->freeze_timer--;
+        mc->is_frozen = true;
+    } else {
+        mc->is_frozen = false;
+    }
+
+    // OBLICZENIE KĄTA Z AKCELEROMETRU (w stopniach)
+    float acc_pitch = atan2f(acc_x, acc_z) * (180.0f / 3.14159265f);
+
+    // Zamiana na stopnie w czasie dt
+    float gyro_delta_deg = (gyro_y / 1000.0f) * DT;
+
+    // FILTR KOMPLEMENTARNY
+    mc->pitch_angle = ALPHA * (mc->pitch_angle + gyro_delta_deg) + (1.0f - ALPHA) * acc_pitch;
+
+    // WYKRYWANIE SIADANIA/WSTAWANIA
+	#define SIT_DOWN_THRESHOLD   200.0f
+	#define STAND_UP_THRESHOLD  -200.0f
+	#define ACC_Z_EMA_BETA       0.3f
+
+    mc->acc_z_ema = (ACC_Z_EMA_BETA * acc_z) + ((1.0f - ACC_Z_EMA_BETA) * mc->acc_z_ema);
+
+    float acc_z_delta_raw = acc_z - 1000.0f;
+
+    if (!mc->is_sitting && acc_z_delta_raw > SIT_DOWN_THRESHOLD) {
+        mc->is_sitting = true;
+        printf(">> SITTING\r\n");
+    } else if (mc->is_sitting && acc_z_delta_raw < STAND_UP_THRESHOLD) {
+        mc->is_sitting = false;
+        printf(">> STANDING\r\n");
+    }
+
+    printf("pitch=%.1f sitting=%d acc_z_delta=%.1f frozen=%d\r\n",
+           mc->pitch_angle, mc->is_sitting, acc_z_delta_raw, mc->is_frozen);
 }
 /* USER CODE END 0 */
 
@@ -240,6 +325,8 @@ int main(void)
 
     neai_state_var = neai_classification_init();
     printf("NEAI init: %d\r\n", neai_state_var);
+
+    MotionController_Init(&mc);
 
     /* Krótki sygnał startowy */
     Buzzer_Beep(2000, 80, 60, 2);
@@ -575,26 +662,26 @@ void PrintBuffer(float *buffer)
     int pos = 0;
 
     /* Reset cursor to top-left smoothly */
-    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[1;1H\n");
+//    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[1;1H\n");
 
     uint16_t row_width = 8;
 
-    for (uint16_t i = 0; i < SIGNAL_SIZE; i++)
-    {
-        uint8_t color_code = get_fast_color(buffer[i]);
+//    for (uint16_t i = 0; i < SIGNAL_SIZE; i++)
+//    {
+//        uint8_t color_code = get_fast_color(buffer[i]);
+//
+//        /* Add the background color and two spaces to the buffer.
+//           Notice we DO NOT reset the color here to save UART bandwidth! */
+//        pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[48;5;%dm  ", color_code);
+//
+//        /* At the end of a row, reset formatting and drop to a new line */
+//        if ((i + 1) % row_width == 0)
+//        {
+//            pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[0m\n");
+//        }
+//    }
 
-        /* Add the background color and two spaces to the buffer.
-           Notice we DO NOT reset the color here to save UART bandwidth! */
-        pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[48;5;%dm  ", color_code);
-
-        /* At the end of a row, reset formatting and drop to a new line */
-        if ((i + 1) % row_width == 0)
-        {
-            pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\033[0m\n");
-        }
-    }
-
-    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\nGyro X:%d Y:%d Z:%d\nAccl X:%d Y:%d Z:%d\n", receivedData.gyroX, receivedData.gyroY, receivedData.gyroZ, receivedData.accelX,
+    pos += snprintf(&out_buf[pos], sizeof(out_buf) - pos, "\nGyro X:%ld Y:%ld Z:%ld\nAccl X:%ld Y:%ld Z:%ld\n", receivedData.gyroX, receivedData.gyroY, receivedData.gyroZ, receivedData.accelX,
                     receivedData.accelY, receivedData.accelZ);
 
     /* Blast the entire buffered frame out over UART in one single shot */
@@ -610,32 +697,60 @@ void Log(void)
         if (status == 0)
         {
             ld2Period = LED_LOG_OK_PERIOD;
-
             PrintBuffer(input_user_buffer);
 
             neai_classification(input_user_buffer, probabilities, &id_class);
-
             printf("# CLASS:%d CONF:%.0f%%\r\n", id_class, probabilities[id_class] * 100.0f);
-            uint32_t d = 0;
             printf("# -> %s\r\n", neai_get_class_name(id_class));
-            switch (id_class)
+
+            MotionController_Update(
+                &mc,
+                (float)receivedData.accelX,
+                (float)receivedData.accelY,
+                (float)receivedData.accelZ,
+                (float)receivedData.gyroY
+            );
+
+            // Wyznacz co wolno buzzeć na podstawie kąta
+            float pitch = mc.pitch_angle;
+            bool mute_all = mc.is_sitting ||  mc.is_frozen;
+            bool mute_bot = (fabsf(pitch - 90.0f) >= PITCH_MUTE_BOTTOM);
+
+            if (mute_all)
             {
-                case 0: /* class_free — 1 krótki pisk */
-                    d = GetMinDistance(input_user_buffer, 0, 7);
-                    Buzzer_Proximity(d, 1000, 1);
-                    break;
-                case 1: /* class_left — lewy buzzer */
-                    d = GetMinDistance(input_user_buffer, 4, 7);
-                    Buzzer_Proximity(d, 1000, 1);
-                    break;
-                case 2: /* class_right — prawy buzzer */
-                    uint32_t d = GetMinDistance(input_user_buffer, 0, 3);
-                    Buzzer_Proximity(d, 1000, 1);
-                    break;
-                case 3: /* class_wall / przed nami — oba */
-                    break;
-                default:
-                    break;
+                // nic nie rób
+            }
+            else
+            {
+                uint32_t d = 0;
+                switch (id_class)
+                {
+                    case 0: /* class_free — przeszkoda wszędzie, oba buzzery */
+                        d = GetMinDistance(input_user_buffer, 0, 7);
+                        Buzzer_Proximity(d, 1000, 2);
+                        break;
+
+                    case 1: /* class_left — przeszkoda po lewej */
+                        if (!mute_bot)
+                            d = GetMinDistance(input_user_buffer, 4, 7); // cała lewa strona
+                        else
+                            d = GetMinDistance(input_user_buffer, 4, 7); // tylko górne rzędy wystarczą
+                        Buzzer_Proximity(d, 1000, 0); // lewy buzzer
+                        break;
+
+                    case 2: /* class_right — przeszkoda po prawej */
+                        d = GetMinDistance(input_user_buffer, 0, 3);
+                        Buzzer_Proximity(d, 1000, 1); // prawy buzzer
+                        break;
+
+                    case 3: /* class_wall — ściana przed nami, oba */
+                        d = GetMinDistance(input_user_buffer, 0, 7);
+                        Buzzer_Proximity(d, 1000, 2);
+                        break;
+
+                    default:
+                        break;
+                }
             }
         }
         else
