@@ -20,7 +20,7 @@ import threading
 from collections import deque
 
 # ── Konfiguracja ─────────────────────────────────────────────
-DEFAULT_BAUD    = 2000000
+DEFAULT_BAUD    = 115200    
 DIST_MAX        = 2000
 MIN_VALID_DIST  = 30
 SERIAL_QUEUE    = deque(maxlen=5)

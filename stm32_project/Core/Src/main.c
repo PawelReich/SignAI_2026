@@ -152,8 +152,8 @@ struct SensorData
     int32_t accelY;
     int32_t accelZ;
 
-    int32_t presenceAmbient;
-    int32_t presenceDiff;
+    float presenceAmbient;
+    float presenceDiff;
 };
 uint8_t rx_byte;            // Holds the single byte we just received
 uint8_t sync_state = 0;     // Tracks our progress finding the header
@@ -281,8 +281,8 @@ void MotionController_Update(MotionController* mc, float acc_x, float acc_y, flo
         printf(">> STANDING\r\n");
     }
 
-    printf("pitch=%.1f sitting=%d acc_z_delta=%.1f frozen=%d\r\n",
-           mc->pitch_angle, mc->is_sitting, acc_z_delta_raw, mc->is_frozen);
+//    printf("pitch=%.1f sitting=%d acc_z_delta=%.1f frozen=%d\r\n",
+//           mc->pitch_angle, mc->is_sitting, acc_z_delta_raw, mc->is_frozen);
 }
 /* USER CODE END 0 */
 
@@ -716,6 +716,7 @@ void Log(void)
             bool mute_all = mc.is_sitting ||  mc.is_frozen;
             bool mute_bot = (fabsf(pitch - 90.0f) >= PITCH_MUTE_BOTTOM);
 
+            mute_all = false;
             if (mute_all)
             {
                 // nic nie rób
@@ -725,27 +726,40 @@ void Log(void)
                 uint32_t d = 0;
                 switch (id_class)
                 {
-                    case 0: /* class_free — przeszkoda wszędzie, oba buzzery */
-                        d = GetMinDistance(input_user_buffer, 0, 7);
-                        Buzzer_Proximity(d, 1000, 2);
+                    case 0: /* class_wall — przeszkoda wszędzie, oba buzzery */
+                    	if(receivedData.presenceDiff > 1.2){
+                    		Buzzer_Tone(523, 150);  // C5
+							Buzzer_Tone(659, 150);  // E5
+							Buzzer_Tone(784, 150);  // G5
+							Buzzer_Tone(1047, 300); // C6 - długa nuta
+
+							HAL_Delay(50);
+
+							// Prawy buzzer - echo
+							Buzzer_R_Tone(523, 150);
+							Buzzer_R_Tone(659, 150);
+							Buzzer_R_Tone(784, 150);
+							Buzzer_R_Tone(1047, 300);
+                    	}
+                    	else{
+							d = GetMinDistance(input_user_buffer, 0, 7);
+							Buzzer_Proximity(d, 1000, 2);
+                    	}
                         break;
 
                     case 1: /* class_left — przeszkoda po lewej */
-                        if (!mute_bot)
-                            d = GetMinDistance(input_user_buffer, 4, 7); // cała lewa strona
-                        else
-                            d = GetMinDistance(input_user_buffer, 4, 7); // tylko górne rzędy wystarczą
-                        Buzzer_Proximity(d, 1000, 0); // lewy buzzer
+                        d = GetMinDistance(input_user_buffer, 0, 7); // cała lewa strona
+                        Buzzer_Proximity(d, 1000, 1); // lewy buzzer
                         break;
 
                     case 2: /* class_right — przeszkoda po prawej */
-                        d = GetMinDistance(input_user_buffer, 0, 3);
-                        Buzzer_Proximity(d, 1000, 1); // prawy buzzer
+                        d = GetMinDistance(input_user_buffer, 0, 7);
+                        Buzzer_Proximity(d, 1000, 0); // prawy buzzer
                         break;
 
-                    case 3: /* class_wall — ściana przed nami, oba */
-                        d = GetMinDistance(input_user_buffer, 0, 7);
-                        Buzzer_Proximity(d, 1000, 2);
+                    case 3: /* class_free — ściana przed nami, oba */
+//                        d = GetMinDistance(input_user_buffer, 0, 7);
+//                        Buzzer_Proximity(d, 1000, 2);
                         break;
 
                     default:
