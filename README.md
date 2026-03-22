@@ -93,6 +93,7 @@ Requires max *STM32CubeIDE 1.18.2*.
 ## Configuration
 
 Key parameters in respective files:
+```
 // Motion Controller
 #define VIB_THRESHOLD     100.0f   // mg — vibration detection sensitivity
 #define FREEZE_TIME_MS    500      // ms — freeze duration after shock
@@ -102,6 +103,7 @@ Key parameters in respective files:
 // ToF / AI
 #define TOF_SENSOR_ODR    15u      // Hz — ToF update rate
 #define DISTANCE_MAX      2000u    // mm — max sensing distance
+```
 
 ## Dependencies
 
@@ -112,8 +114,8 @@ Key parameters in respective files:
 - STHS34PF80 driver (ST)
 
 ## Team
-Paweł Reich
-Kamil Ratajczyk
-Jan Landecki
-Jakub Sawicki
+* Paweł Reich
+* Kamil Ratajczyk
+* Jan Landecki
+* Jakub Sawicki
 Built at *SignAI Hackathon 2026*.
