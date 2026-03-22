@@ -157,7 +157,7 @@ int32_t VL53L8A1_RANGING_SENSOR_GetCapabilities(uint32_t Instance, RANGING_SENSO
   }
 
   return ret;
-	}
+}
 
 /**
   * @brief Set the ranging configuration profile.
