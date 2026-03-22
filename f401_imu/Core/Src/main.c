@@ -18,30 +18,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "imu.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h> // Needed for printf
-
-#include <stdint.h>
-#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef struct {
-    float pitch_angle;     // Ostateczny, odfiltrowany kąt pochylenia
-    float acc_mag_ema;
-    uint32_t freeze_timer; // Licznik "zamrożenia" urządzenia
-    bool is_frozen;        // Flaga statusu (dla reszty programu)
-} MotionController;
-
-typedef struct {
-    bool left_top;
-    bool right_top;
-    bool left_bot;
-    bool right_bot;
-} AI_Zones;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -51,27 +35,13 @@ typedef struct {
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-// --- KONFIGURACJA ---
-#define DT 0.050f                  // Czas pętli w sekundach
-#define ALPHA 0.1f               // Współczynnik filtru komplementarnego
-#define EMA_BETA 0.5f             // Współczynnik filtru EMA dla drgań (0.1 - mocny, 0.9 - słaby)
-#define VIB_THRESHOLD 100.0f        // Próg odchyłki wektora grawitacji m mg
-#define FREEZE_TIME_MS 500        // Czas zamrożenia po wstrząsie (w milisekundach)
-#define FREEZE_CYCLES (uint32_t)(FREEZE_TIME_MS / (DT * 1000.0f))
-
-// Progi pochylenia
-#define PITCH_MUTE_BOTTOM 15.0f // Przy 15° ToF zaczyna widzieć podłogę dolnym rzędem
-#define PITCH_MUTE_ALL 35.0f // Przy 35° mute na wszystko
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
-
-AI_Zones detections;
-MotionController mc;
-float acc_x, acc_y, acc_z, gyro_x;
 
 /* USER CODE BEGIN PV */
 
@@ -82,201 +52,15 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-int _write(int file, char *ptr, int len)
-{
-    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-    return len;
-}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
 /* Includes */
-#include "lsm6dsv16x.h"
-#include "sths34pf80.h"
-
 extern I2C_HandleTypeDef hi2c1;
-
-STHS34PF80_Object_t sths_obj;
-LSM6DSV16X_Object_t lsm_obj;
-
-#define STHS34PF80_I2C_ADD 0xB4
-#define LSM6DSV16X_I2C_ADD 0xD6
-
-/* Platform specific wrapper functions */
-int32_t Platform_WriteReg(uint16_t Addr, uint16_t Reg, uint8_t *pData, uint16_t Length)
-{
-    if (HAL_I2C_Mem_Write(&hi2c1, Addr, Reg, I2C_MEMADD_SIZE_8BIT, pData, Length, 1000) == HAL_OK)
-    {
-        return 0; // Success
-    }
-    return -1; // Error
-}
-
-int32_t Platform_ReadReg(uint16_t Addr, uint16_t Reg, uint8_t *pData, uint16_t Length)
-{
-    if (HAL_I2C_Mem_Read(&hi2c1, Addr, Reg, I2C_MEMADD_SIZE_8BIT, pData, Length, 1000) == HAL_OK)
-    {
-        return 0; // Success
-    }
-    return -1; // Error
-}
-
-int32_t Platform_Init(void) { return 0; }
-int32_t Platform_DeInit(void) { return 0; }
-void BSP_Sensors_Init(void)
-{
-    STHS34PF80_IO_t sths_io = {0};
-    sths_io.BusType = STHS34PF80_I2C_BUS;
-    sths_io.Address = STHS34PF80_I2C_ADD;
-    sths_io.Init = Platform_Init;
-    sths_io.DeInit = Platform_DeInit;
-    sths_io.WriteReg = Platform_WriteReg;
-    sths_io.ReadReg = Platform_ReadReg;
-    sths_io.GetTick = (STHS34PF80_GetTick_Func)HAL_GetTick;
-    sths_io.Delay = HAL_Delay;
-
-    // Link IO and Initialize Object
-    STHS34PF80_RegisterBusIO(&sths_obj, &sths_io);
-    if (STHS34PF80_Init(&sths_obj) == STHS34PF80_OK)
-    {
-        // Enable desired features
-        STHS34PF80_TEMP_Enable(&sths_obj);
-        STHS34PF80_TEMP_SetOutputDataRate(&sths_obj, 15.0f);
-
-        STHS34PF80_SetAvgTmos(&sths_obj, 32);
-    }
-
-    /* -----------------------------------------------------------------------
-     */
-    /* 2. Initialize LSM6DSV16X (IMU: Accelerometer + Gyroscope) */
-    /* -----------------------------------------------------------------------
-     */
-    LSM6DSV16X_IO_t lsm_io = {0};
-    lsm_io.BusType = LSM6DSV16X_I2C_BUS; // Defined in your header as 0U
-    lsm_io.Address = LSM6DSV16X_I2C_ADD;
-    lsm_io.Init = Platform_Init;
-    lsm_io.DeInit = Platform_DeInit;
-    lsm_io.WriteReg = Platform_WriteReg;
-    lsm_io.ReadReg = Platform_ReadReg;
-    lsm_io.GetTick = (LSM6DSV16X_GetTick_Func)HAL_GetTick;
-    lsm_io.Delay = HAL_Delay;
-
-    // Link IO and Initialize Object
-    LSM6DSV16X_RegisterBusIO(&lsm_obj, &lsm_io);
-    if (LSM6DSV16X_Init(&lsm_obj) == LSM6DSV16X_OK)
-    {
-        // Enable desired features
-        LSM6DSV16X_ACC_Enable(&lsm_obj);
-        LSM6DSV16X_GYRO_Enable(&lsm_obj);
-        // Wake up the IMU by setting the Output Data Rate (e.g., 104 Hz)
-        LSM6DSV16X_ACC_SetOutputDataRate(&lsm_obj, 104.0f);
-        LSM6DSV16X_GYRO_SetOutputDataRate(&lsm_obj, 104.0f);
-    }
-}
-void Scan_I2C_Bus(void)
-{
-    printf("Scanning I2C bus...\r\n");
-    uint8_t devices_found = 0;
-
-    /* Loop through all possible 7-bit addresses (1 to 127) */
-    for (uint8_t i = 1; i < 128; i++)
-    {
-        /* STM32 HAL requires the address to be shifted left by 1 bit */
-        uint16_t hal_address = (uint16_t)(i << 1);
-
-        /* Ping the address (3 trials, 10ms timeout) */
-        if (HAL_I2C_IsDeviceReady(&hi2c1, hal_address, 3, 10) == HAL_OK)
-        {
-            printf("-> Device found! 7-bit Addr: 0x%02X | STM32 8-bit Addr: "
-                   "0x%02X\r\n",
-                   i, hal_address);
-            devices_found++;
-        }
-    }
-
-    if (devices_found == 0)
-    {
-        printf("No I2C devices found. Check cables, power, and pull-up "
-               "resistors!\r\n");
-    }
-    else
-    {
-        printf("Scan complete. %d device(s) found.\r\n", devices_found);
-    }
-    printf("----------------------------------\r\n");
-}
-
-// Inicjalizacja struktury
-void MotionController_Init(MotionController* mc) {
-    mc->pitch_angle = 0.0f;
-    mc->acc_mag_ema = 1000.0f;
-    mc->freeze_timer = 0;
-    mc->is_frozen = false;
-}
-
-void AI_Zones_Init(AI_Zones* detections) {
-    detections->left_top = false;
-    detections->right_top = false;
-    detections->left_bot = false;
-    detections->right_bot = false;
-}
-
-// funkcja wykonywana co DT w main
-void MotionController_Update(AI_Zones* detections, MotionController* mc, float acc_x, float acc_y, float acc_z, float gyro_y) {
-
-    // WYKRYWANIE DRGAŃ
-    float acc_magnitude = sqrtf(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z);
-
-    // użycie filtracji wykładniczej średniej kroczącej na akcelerometr
-    mc->acc_mag_ema = (EMA_BETA * acc_magnitude) + ((1.0f - EMA_BETA) * mc->acc_mag_ema);
-
-    float acc_diff = fabsf(mc->acc_mag_ema - 1000.0f); // Odchyłka od idealnej grawitacji (1g)
-
-    // Jeśli odchyłka jest większa niż próg, odnawiamy licznik zamrożenia
-    if (acc_diff > VIB_THRESHOLD) {
-        mc->freeze_timer = FREEZE_CYCLES;
-    }
-
-    // Dekrementacja licznika i aktualizacja flagi
-    if (mc->freeze_timer > 0) {
-        mc->freeze_timer--;
-        mc->is_frozen = true;
-    } else {
-        mc->is_frozen = false;
-    }
-
-    // OBLICZENIE KĄTA Z AKCELEROMETRU (w stopniach)
-    float acc_pitch = atan2f(acc_x, acc_z) * (180.0f / 3.14159265f); // upewnić się że osie y i z się zgadzają
-    printf("Acc_pitch=%.2f\r\n", acc_pitch);
-
-    // Zamiana na stopnie w czasie dt
-    float gyro_delta_deg = (gyro_y / 1000.0f) * DT;
-
-    // APLIKACJA FILTRU KOMPLEMENTARNEGO
-    mc->pitch_angle = ALPHA * (mc->pitch_angle + gyro_delta_deg) + (1.0f - ALPHA) * acc_pitch;
-
-    if (mc->is_frozen) {
-        // URZĄDZENIE TRZĘSIE SIĘ:
-    	// mc->pitch_angle = mc->pitch_angle + gyro_delta_deg;
-
-        detections->left_top = false; detections->right_top = false;
-        detections->left_bot = false; detections->right_bot = false;
-    } else {
-        // NORMALNA PRACA:
-    	// mc->pitch_angle = ALPHA * (mc->pitch_angle + gyro_delta_deg) + (1.0f - ALPHA) * acc_pitch;
-
-        if (fabsf(mc->pitch_angle-90.0f) >= PITCH_MUTE_ALL) {
-            detections->left_top = false; detections->right_top = false;
-            detections->left_bot = false; detections->right_bot = false;
-        }
-        else if (fabsf(mc->pitch_angle-90.0f) >= PITCH_MUTE_BOTTOM) {
-            detections->left_bot = false; detections->right_bot = false;
-        }
-    }
-}
 
 /* USER CODE END 0 */
 
@@ -291,11 +75,9 @@ int main(void)
 
     /* USER CODE END 1 */
 
-    /* MCU
-     * Configuration--------------------------------------------------------*/
+    /* MCU Configuration--------------------------------------------------------*/
 
-    /* Reset of all peripherals, Initializes the Flash interface and the
-     * Systick. */
+    /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
     HAL_Init();
 
     /* USER CODE BEGIN Init */
@@ -313,28 +95,10 @@ int main(void)
     MX_GPIO_Init();
     MX_USART2_UART_Init();
     MX_I2C1_Init();
+    MX_USART1_UART_Init();
     /* USER CODE BEGIN 2 */
 
-    MotionController_Init(&mc);
-    AI_Zones_Init(&detections);
-
-    //  Scan_I2C_Bus();
-
-    BSP_Sensors_Init();
-
-    printf("TOP\r\n");
-    /* Variables to hold STHS34PF80 data */
-    float ambient_temp = 0.0f;
-    float object_temp = 0.0f;
-    uint8_t sths_ready = 0;
-
-    /* Variables to hold LSM6DSV16X data */
-    LSM6DSV16X_Axes_t acc_axes;
-    LSM6DSV16X_Axes_t gyro_axes;
-    uint8_t lsm_acc_ready = 0;
-    uint8_t lsm_gyro_ready = 0;
-    int16_t presence_data = 0;
-    uint8_t presence_flag = 0;
+    Imu_Init(&hi2c1, &huart1);
 
     /* USER CODE END 2 */
 
@@ -345,55 +109,7 @@ int main(void)
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */
-
-        LSM6DSV16X_ACC_Get_DRDY_Status(&lsm_obj, &lsm_acc_ready);
-        if (lsm_acc_ready == 1)
-        {
-            LSM6DSV16X_ACC_GetAxes(&lsm_obj, &acc_axes);
-
-//            acc_axes.x = acc_axes.x/1000.0f;
-//            acc_axes.y = acc_axes.y/1000.0f;
-//            acc_axes.z = acc_axes.z/1000.0f;
-            printf("ACC (g): X=%.2f, Y=%.2f, Z=%.2f\r\n", acc_axes.x/1000.0f, acc_axes.y/1000.0f, acc_axes.z/1000.0f);
-        }
-
-        LSM6DSV16X_GYRO_Get_DRDY_Status(&lsm_obj, &lsm_gyro_ready);
-        if (lsm_gyro_ready == 1)
-        {
-            LSM6DSV16X_GYRO_GetAxes(&lsm_obj, &gyro_axes);
-
-//            gyro_axes.x = gyro_axes.x/1000.0f;
-//			gyro_axes.y = gyro_axes.y/1000.0f;
-//			gyro_axes.z = gyro_axes.z/1000.0f;
-            printf("GYRO (deg/s): X=%.2f, Y=%.2f, Z=%.2f\r\n", gyro_axes.x/1000.0f, gyro_axes.y/1000.0f, gyro_axes.z/1000.0f);
-        }
-
-        STHS34PF80_TEMP_Get_DRDY_Status(&sths_obj, &sths_ready);
-        if (sths_ready == 1)
-        {
-            STHS34PF80_TEMP_GetTemperature(&sths_obj, &ambient_temp);
-            STHS34PF80_GetObjectTemperature(&sths_obj, &object_temp);
-
-            STHS34PF80_GetPresenceData(&sths_obj, &presence_data);
-            STHS34PF80_GetPresenceFlag(&sths_obj, &presence_flag);
-
-            // Calculate differential heat signature
-            float diff_temp = (float)presence_data / 2000.0f;
-
-            printf("STHS: Room=%.1f C | Heat Delta=%.2f C | Flag=%d\r\n", ambient_temp, diff_temp, presence_flag);
-        }
-
-        // Ustawianie na true dla testów, żeby zoabczyć co mationcontroller ustawia na true
-        detections->left_top = false; detections->right_top = false;
-        detections->left_bot = false; detections->right_bot = false;
-
-        MotionController_Update(&detections, &mc, acc_axes.x, acc_axes.y, acc_axes.z, gyro_axes.y);
-
-        printf("Values pitch_angle=%.2f, acc_mag_ema=%.2f, is_frozen=%d\r\n", mc.pitch_angle, mc.acc_mag_ema/1000.0f, mc.is_frozen);
-        printf("Left top=%d     Right top=%d\r\n", detections.left_top, detections.right_top);
-        printf("Left bot=%d     Right bot=%d\r\n", detections.left_bot, detections.right_bot);
-
-        HAL_Delay(50);
+        Imu_Loop();
     }
     /* USER CODE END 3 */
 }
@@ -474,6 +190,38 @@ static void MX_I2C1_Init(void)
     /* USER CODE BEGIN I2C1_Init 2 */
 
     /* USER CODE END I2C1_Init 2 */
+}
+
+/**
+ * @brief USART1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART1_UART_Init(void)
+{
+
+    /* USER CODE BEGIN USART1_Init 0 */
+
+    /* USER CODE END USART1_Init 0 */
+
+    /* USER CODE BEGIN USART1_Init 1 */
+
+    /* USER CODE END USART1_Init 1 */
+    huart1.Instance = USART1;
+    huart1.Init.BaudRate = 115200;
+    huart1.Init.WordLength = UART_WORDLENGTH_8B;
+    huart1.Init.StopBits = UART_STOPBITS_1;
+    huart1.Init.Parity = UART_PARITY_NONE;
+    huart1.Init.Mode = UART_MODE_TX_RX;
+    huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+    if (HAL_UART_Init(&huart1) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    /* USER CODE BEGIN USART1_Init 2 */
+
+    /* USER CODE END USART1_Init 2 */
 }
 
 /**
