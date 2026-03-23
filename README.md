@@ -18,6 +18,7 @@ feedback about surrounding obstacles.
 - *2x Piezo buzzers* - left and right feedback
 
 ## Architecture
+```
 [STM32F4 - Sensor Board]          [STM32L476 - Main Board]
   LSM6DSV16X (IMU)                  VL53L8CX (ToF 8x8)
   STHS34PF80 (IR)                   NanoEdge AI
@@ -29,7 +30,7 @@ feedback about surrounding obstacles.
                                     MotionController
                                            |
                                     Buzzer L + Buzzer R
-
+```
 ## How It Works
 
 ### 1. AI Classification (NanoEdge AI)
